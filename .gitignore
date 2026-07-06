@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+.env
+.env.*
+
+# Package and build artifacts
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+*.egg
+*.manifest
+*.spec
+
+# FastAPI / Python cache and reports
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
