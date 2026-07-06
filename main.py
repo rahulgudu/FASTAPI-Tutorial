@@ -19,3 +19,8 @@ def get_users(name: str = None): # query params are optional, so we can set defa
 @app.get("/products")
 def get_products(price: float = 20):
     return {"price": price}
+
+# post api
+@app.post("/items")
+def create_item(item: dict):
+    return {"message": "Item created", "item": item}
