@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from typing import List, Optional
 
+from fastapi import FastAPI
+from pydantic import BaseModel, Field, EmailStr
 app = FastAPI();
 
 @app.get("/")
@@ -24,3 +26,26 @@ def get_products(price: float = 20):
 @app.post("/items")
 def create_item(item: dict):
     return {"message": "Item created", "item": item}
+
+
+# Pydantic Schema 
+class BoardMeetingCreate(BaseModel):
+    #standard madetory fields
+    title: str
+    agenda: str
+    
+    #Restricitng integer values using Field
+    duration_minutes: int = Field(gt=0, le=480, description="Meeting duration in minutes, must be between 1 and 480")
+    
+    #An optional field (defaults to None if not provided)
+    confidential_notes: Optional[str] = None
+    
+    #Pydantic ntively supports complex types like lists
+    attendees: List[str]
+
+#use the schema in fast api routes
+@app.post("/meetings/") 
+async def create_meeting(meeting: BoardMeetingCreate):
+    meeting_dict = meeting.model_dump()
+    
+    return {"message": "Meeting created successfully", "meeting": meeting_dict}
