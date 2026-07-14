@@ -49,3 +49,44 @@ async def create_meeting(meeting: BoardMeetingCreate):
     meeting_dict = meeting.model_dump()
     
     return {"message": "Meeting created successfully", "meeting": meeting_dict}
+
+
+# Nested Pydantic Models
+
+# 1. Define the child (sub) models first
+class DocuementMetaData(BaseModel):
+    version: str = Field(default="1.0", pattern=r"^\d+\.\d+$")
+    is_confidential: bool = True
+
+class Organizer(BaseModel):
+    name: str
+    email: EmailStr
+    department: str
+
+class AgendaItem(BaseModel):
+    title: str
+    duration_minutes: int = Field(gt=0, description="Must be a positive integer")
+    speaker: str
+    
+#2 . Define the parent model that nests the sub-models
+class DetailedBoardMeeting(BaseModel):
+    title: str
+    organizer: Organizer
+    agenda_items: List[AgendaItem]
+    metadata: Optional[DocuementMetaData] = None
+    
+
+# 3. Use the parent model in your FastAPI route
+@app.post("/meetings/detailed")
+async def create_detailed_meeting(meeting: DetailedBoardMeeting):
+    # Pydantic validates the entire structure before this code runs.
+    # You can access deeply nested attributes using dot notation:
+    organizer_email = meeting.organizer.email
+    first_item_duration = meeting.agenda_items[0].duration_minutes
+    
+    return {
+        "message": f"Detailed meeting structure validated for '{meeting.title}'",
+        "organizer_email": organizer_email,
+        "first_agenda_duration": first_item_duration,
+        "full_data": meeting.model_dump() # Dumps the entire nested structure into a standard Python dictionary/JSON object
+    }
