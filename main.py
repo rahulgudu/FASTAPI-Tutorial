@@ -1,130 +1,79 @@
 from typing import List, Optional
 
-from typing import List, Optional
 
-from fastapi import FastAPI
+
+from fastapi import FastAPI, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from pydantic import BaseModel, Field, EmailStr
 app = FastAPI();
 
 @app.get("/")
 def home():
     return {"message": "Fast api with venv is running fine"}
 
-# params
-@app.get("/items/{item_id}")
-def read_item(item_id: int):
-    return {"item_id": item_id}
-
-# query params: /users?name=John
-@app.get("/users")
-def get_users(name: str = None): # query params are optional, so we can set default value to None
-    return {"name": name}
-
-@app.get("/products")
-def get_products(price: float = 20):
-    return {"price": price}
-
-# post api
-@app.post("/items")
-def create_item(item: dict):
-    return {"message": "Item created", "item": item}
-
-
-# Hiding sensitve information and response models
-class DocumentCreate(BaseModel):
+# Professional API Status and Custom Responses with error handeling
+class DocumentMetadataUpdate(BaseModel):
     title: str
-    content: str
-    confidential_notes: str
-    author_id: int
-    system_flags: List[str] = ["internal-draft"]
+    is_confidential: bool
+
+MOCK_DOCUMENTS = {
+    1: {"title": "Document 1", "is_confidential": False},
+}
 
 
-class DocumentResponse(BaseModel):
-    title: str
-    content: str
-
-
-DOCUMENTS_DB = [
-    {
-        "title": "Q3 Financial Strategy",
-        "content": "The company targets a 15% revenue growth in Q3.",
-        "confidential_notes": "CEO considering downsizing the marketing team if targets fail.",
-        "author_id": 9921,
-        "system_flags": ["restricted", "highly-sensitive"]
-    }
-]
-
-# secure endpoints
-@app.get("/documents/public", response_model=List[DocumentResponse])
-async def get_public_documents():
-    return DOCUMENTS_DB
-
-#privileged endpoints
-@app.get("/documents/internal")
-async def get_internal_documents():
-    return DOCUMENTS_DB
-
-
-# Pydantic Schema 
-class BoardMeetingCreate(BaseModel):
-    #standard madetory fields
-    title: str
-    agenda: str
+# --- 1. CUSTOM GLOBAL EXCEPTION HANDLER ---
+# In Express, this is like global error-handling middleware.
+# Here, we override the default 404 behavior to format all 404 responses uniformly.
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code == status.HTTP_404_NOT_FOUND:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "success": False,
+                "error_code": "RESOURCE_MISSING",
+                "message": exc.detail,
+                "hint": "Please verify the document identifer and try again."
+            }
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail
+        }
+    )
     
-    #Restricitng integer values using Field
-    duration_minutes: int = Field(gt=0, le=480, description="Meeting duration in minutes, must be between 1 and 480")
-    
-    #An optional field (defaults to None if not provided)
-    confidential_notes: Optional[str] = None
-    
-    #Pydantic ntively supports complex types like lists
-    attendees: List[str]
-
-#use the schema in fast api routes
-@app.post("/meetings/") 
-async def create_meeting(meeting: BoardMeetingCreate):
-    meeting_dict = meeting.model_dump()
-    
-    return {"message": "Meeting created successfully", "meeting": meeting_dict}
-
-
-# Nested Pydantic Models
-
-# 1. Define the child (sub) models first
-class DocuementMetaData(BaseModel):
-    version: str = Field(default="1.0", pattern=r"^\d+\.\d+$")
-    is_confidential: bool = True
-
-class Organizer(BaseModel):
-    name: str
-    email: EmailStr
-    department: str
-
-class AgendaItem(BaseModel):
-    title: str
-    duration_minutes: int = Field(gt=0, description="Must be a positive integer")
-    speaker: str
-    
-#2 . Define the parent model that nests the sub-models
-class DetailedBoardMeeting(BaseModel):
-    title: str
-    organizer: Organizer
-    agenda_items: List[AgendaItem]
-    metadata: Optional[DocuementMetaData] = None
-    
-
-# 3. Use the parent model in your FastAPI route
-@app.post("/meetings/detailed")
-async def create_detailed_meeting(meeting: DetailedBoardMeeting):
-    # Pydantic validates the entire structure before this code runs.
-    # You can access deeply nested attributes using dot notation:
-    organizer_email = meeting.organizer.email
-    first_item_duration = meeting.agenda_items[0].duration_minutes
-    
+# --- 2. API ROUTES WITH EXPLICIT STATUS CODES ---
+@app.get("/documents/{doc_id}", status_code=status.HTTP_200_OK)
+async def get_document(doc_id: int):
+    if doc_id not in MOCK_DOCUMENTS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with ID {doc_id} could not be found."
+        )
     return {
-        "message": f"Detailed meeting structure validated for '{meeting.title}'",
-        "organizer_email": organizer_email,
-        "first_agenda_duration": first_item_duration,
-        "full_data": meeting.model_dump() # Dumps the entire nested structure into a standard Python dictionary/JSON object
+        "success": True,
+        "data": MOCK_DOCUMENTS[doc_id]
+    }
+    
+@app.put("/documents/{doc_id}", status_code=status.HTTP_200_OK)
+async def update_document(doc_id: int, payload: DocumentMetadataUpdate):
+    if doc_id not in MOCK_DOCUMENTS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with ID {doc_id} could not be found."
+        )
+    
+    
+    if MOCK_DOCUMENTS[doc_id]["is_confidential"] and not payload.is_confidential:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Security policy violation: Confidential documents cannot be made public arbitrarily."
+        )
+        
+    MOCK_DOCUMENTS[doc_id].update(payload.model_dump())
+    return {
+        "success": True,
+        "message": "Document updated successfully.",
+        "data": MOCK_DOCUMENTS[doc_id]
     }
