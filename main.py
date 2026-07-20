@@ -1,91 +1,63 @@
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, Field
+from typing import Optional
+from fastapi import FastAPI, Depends, HTTPException, Header, status
+from pydantic import BaseModel
 
 app = FastAPI()
 
-# --- 1. DEFINE CUSTOM APP-SPECIFIC EXCEPTIONS ---
-# Creating custom Python classes allows you to flag specific domain errors easily.
-class DatabaseConnectionError(Exception):
-    """Raised when the enterprise database fails to respond."""
-    def __init__(self, message: str):
-        self.message = message
+# A mock user database
+VALID_TOKENS = {
+    "token_sarah_123": {"name": "Sarah Jenkins", "role": "Admin", "clearance": "Top Secret"},
+    "token_alex_456": {"name": "Alex Rivera", "role": "Legal Auditor", "clearance": "Standard"}
+}
 
-class DocumentAccessDeniedError(Exception):
-    """Raised when a user attempts to view highly confidential records."""
-    def __init__(self, doc_id: int):
-        self.doc_id = doc_id
-
-
-# --- 2. THE GLOBAL ERROR HANDLERS ---
-
-# Handler A: Catches custom internal database connection issues
-@app.exception_handler(DatabaseConnectionError)
-async def db_connection_exception_handler(request: Request, exc: DatabaseConnectionError):
-    return JSONResponse(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        content={
-            "success": False,
-            "error_code": "DATABASE_TEMPORARILY_OFFLINE",
-            "message": exc.message,
-            "hint": "The infrastructure team has been notified. Retrying shortly."
-        }
-    )
-
-# Handler B: Catches custom business logic / permission violations
-@app.exception_handler(DocumentAccessDeniedError)
-async def access_denied_exception_handler(request: Request, exc: DocumentAccessDeniedError):
-    return JSONResponse(
-        status_code=status.HTTP_403_FORBIDDEN,
-        content={
-            "success": False,
-            "error_code": "CLASSIFIED_ACCESS_VIOLATION",
-            "message": f"Access strictly denied for Document ID {exc.doc_id}.",
-            "hint": "This incident has been logged. Verify your cleared credentials."
-        }
-    )
-
-# Handler C: INTERCEPT & OVERRIDE Pydantic's default 422 Validation Error
-# By default, Pydantic sends back a verbose, messy array. Let's make it beautiful for the MERN frontend.
-@app.exception_handler(RequestValidationError)
-async def custom_validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Flatten out the Pydantic error array into a clean dictionary mapping fields to messages
-    formatted_errors = {}
-    for error in exc.errors():
-        # error['loc'] gives a tuple like ('body', 'duration_minutes')
-        field_name = error['loc'][-1]
-        formatted_errors[field_name] = error['msg']
-
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "success": False,
-            "error_code": "INVALID_REQUEST_PAYLOAD",
-            "message": "The data provided failed incoming schema validation checks.",
-            "fields": formatted_errors
-        }
-    )
+# The User Schema passed down to routes
+class CurrentUser(BaseModel):
+    name: str
+    role: str
+    clearance: str
 
 
-# --- 3. TEST PATHS ---
+# --- 1. THE REUSABLE DEPENDENCY FUNCTION ---
+# This function handles the heavy lifting: extracting headers and validating tokens.
+async def get_current_user(x_auth_token: Optional[str] = Header(None)) -> CurrentUser:
+    if not x_auth_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing 'X-Auth-Token' security header."
+        )
+        
+    if x_auth_token not in VALID_TOKENS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or expired session token."
+        )
+        
+    # If valid, return a Pydantic object representing the user
+    user_data = VALID_TOKENS[x_auth_token]
+    return CurrentUser(**user_data)
 
-class TestSchema(BaseModel):
-    title: str = Field(min_length=3)
-    duration_minutes: int = Field(gt=0)
 
-@app.post("/test-validation")
-async def test_validation_route(payload: TestSchema):
-    return {"status": "valid", "data": payload}
+# --- 2. ENDPOINTS USING DEPENDENCY INJECTION ---
 
-@app.get("/trigger-db-error")
-async def trigger_db():
-    # Simulating a crash when contacting a cluster
-    raise DatabaseConnectionError("Connection timeout out after 5000ms.")
+# Route A: Requires general authentication
+@app.get("/documents/board-minutes")
+async def get_board_minutes(user: CurrentUser = Depends(get_current_user)):
+    # The 'user' variable is automatically injected here after passing validation
+    return {
+        "message": f"Welcome {user.name} ({user.role}). Access granted to standard minutes.",
+        "data": ["Minutes from 2026-02-14", "Minutes from 2026-05-11"]
+    }
 
-@app.get("/trigger-auth-error/{doc_id}")
-async def trigger_auth(doc_id: int):
-    # Simulating an unauthorized access block
-    if doc_id == 99:
-        raise DocumentAccessDeniedError(doc_id=99)
-    return {"status": "Allowed"}
+# Route B: Uses the same dependency, but layers on extra clearance logic inside the endpoint
+@app.get("/documents/highly-classified")
+async def get_classified_docs(user: CurrentUser = Depends(get_current_user)):
+    if user.clearance != "Top Secret":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security Clearance Level insufficient for these files."
+        )
+        
+    return {
+        "message": "Accessing high-security encryption vaults...",
+        "owner": user.name
+    }
