@@ -1,18 +1,25 @@
 from typing import List
 from fastapi import FastAPI, Depends, HTTPException, status
 from pydantic import BaseModel
-import sqlite3
 
-from database import get_db_connection, init_db
+from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy.orm import Session
+
+from database import engine, Base, get_db
 
 app = FastAPI(title="Enterprise API with Middleware")
 
 
-@app.on_event("startup")
-def startup_event():
-    # Initialize the database when the application starts
-    init_db()
+class MeetingModel(Base):
+    __tablename__ = "meetings"
     
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    agenda = Column(String, nullable = False)
+    is_confidential = Column(Boolean, default = False)
+    
+Base.metadata.create_all(bind=engine)
+
 class MeetingCreate(BaseModel):
     title: str
     agenda: str
@@ -24,63 +31,51 @@ class MeetingResponse(BaseModel):
     agenda: str
     is_confidential: bool
 
-# CRUD operations for board meetings
+    class Config:
+        form_attributes = True
+        
+@app.post("/meetings", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
+    
+    db_meeting = MeetingModel(
+        title=meeting.title,
+        agenda=meeting.agenda,
+        is_confidential=meeting.is_confidential
+    )
+    db.add(db_meeting)
+    db.commit()
+    db.refresh(db_meeting)
+    return db_meeting
 
 @app.get("/meetings", response_model=List[MeetingResponse])
-async def get_all_meetings(conn: sqlite3.Connection = Depends(get_db_connection)):
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, agenda, is_confidential FROM board_meetings")
-    rows = cursor.fetchall()
-    
-    # Explicitly construct the dictionary for each row
-    return [
-        dict(row) for row in rows
-    ]
-    
-    
-@app.get("/meetings", response_model=List[MeetingResponse])
-async def get_all_meetings(conn: sqlite3.Connection = Depends(get_db_connection)):
-    cursor = conn.cursor()
-    
-    
-    cursor.execute("SELECT id, title, agenda, is_confidential FROM board_meetings")
-    
-    rows = cursor.fetchall()
-    
-    
-    return [
-        {
-            "id": row["id"],
-            "title": row["title"],
-            "agenda": row["agenda"],
-            "is_confidential": bool(row["is_confidential"])
-        }
-        for row in rows
-    ]
+async def get_all_meetings(db: Session = Depends(get_db)):
+    meetings = db.query(MeetingModel).all()
+    return meetings
 
 
 @app.get("/meetings/{meeting_id}", response_model=MeetingResponse)
-async def get_meeting(meeting_id: int, conn: sqlite3.Connection = Depends(get_db_connection)):
-    cursor = conn.cursor()
+async def get_meeting(meeting_id: int, db: Session = Depends(get_db)):
+    # Equivalent to SELECT * FROM meetings WHERE id = meeting_id LIMIT 1
+    meeting = db.query(MeetingModel).filter(MeetingModel.id == meeting_id).first()
     
-    cursor.execute("SELECT id, title, agenda, is_confidential FROM board_meetings WHERE id = ?", (meeting_id,))
-    
-    row = cursor.fetchone()
-    
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    
-    return dict(row)
-
-@app.delete("/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_meeting(meeting_id: int, conn: sqlite3.Connection = Depends(get_db_connection)):
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM board_meetings WHERE id = ?", (meeting_id,))
-    conn.commit()
-    
-    if cursor.rowcount == 0:
+    if not meeting:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, 
             detail=f"Meeting with ID {meeting_id} not found."
         )
+    return meeting
+
+
+@app.delete("/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_meeting(meeting_id: int, db: Session = Depends(get_db)):
+    meeting = db.query(MeetingModel).filter(MeetingModel.id == meeting_id).first()
+    
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail=f"Meeting with ID {meeting_id} not found."
+        )
+    
+    db.delete(meeting)
+    db.commit()
     return

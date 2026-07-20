@@ -1,30 +1,22 @@
-import sqlite3
+from sqlalchemy import create_engine
 
-DB_NAME="board_meetings_raw.db"
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    
-    conn.row_factory = sqlite3.Row  # This allows us to access columns by name
-    
+SQLALCHEMY_DATABASE_URL = "sqlite:///./board_meetings_orm.db"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
     try:
-        yield conn
+        yield db
     finally:
-        conn.close()
+        db.close()
+        
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    # Create a sample table for board meetings
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS board_meetings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            agenda TEXT NOT NULL,
-            is_confidential BOOLEAN NOT NULL DEFAULT FALSE
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
