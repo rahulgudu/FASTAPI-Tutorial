@@ -1,59 +1,31 @@
-from ast import List
-from datetime import datetime, timedelta, timezone
-import os
-import shutil
-from typing import Optional
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.staticfiles import StaticFiles
-import jwt
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from passlib.context import CryptContext
-from pydantic import BaseModel
+app = FastAPI(title="FastAPI CORS Handling")
 
-app = FastAPI(title="File Uploads & Static Assets")
+# 1. Define allowed origin URLs (Frontend servers)
+# Do NOT use ["*"] in production if credentials (cookies/auth headers) are sent!
+origins = [
+    "http://localhost:3000",      # Default React / Next.js local development server
+    "http://127.0.0.1:3000",
+    "https://my-company-app.com"   # Production Frontend Domain
+]
 
-# Define storage directory path
-UPLOAD_DIR = "uploaded_documents"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# 2. Attach CORSMiddleware to the FastAPI instance
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,            # Specifies allowed domains
+    allow_credentials=True,           # Allows cookies & Authorization headers (JWT)
+    allow_methods=["*"],              # Allows all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],              # Allows all headers (e.g., Content-Type, Authorization)
+)
 
-app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
-
-@app.post("/upload-document", status_code=status.HTTP_201_CREATED)
-async def upload_document(file: UploadFile = File(...)):
-    allowed_extensions = [".pdf", ".docx", ".txt", ".png", ".jpg"]
-    file_ext = os.path.splitext(file.filename)[1].lower();
-    
-    if file_ext not in allowed_extensions:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported file type. Allowed types: {', '.join(allowed_extensions)}")
-    
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
+# -------------------------------------------------------------
+# SAMPLE ROUTE
+# -------------------------------------------------------------
+@app.get("/api/data")
+async def get_protected_data():
     return {
-        "filename": file.filename,
-        "file_path": f"/static/{file.filename}",
-        "message": "File uploaded successfully."
-    }
-    
-@app.post("/upload-multiple-documents/")
-async def upload_multiple_documents(files: List[UploadFile] = File(...)):
-    uploaded_records = []
-
-    for file in files:
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        uploaded_records.append({
-            "filename": file.filename,
-            "public_url": f"/static/{file.filename}"
-        })
-
-    return {
-        "total_files_uploaded": len(uploaded_records),
-        "files": uploaded_records
+        "status": "Success",
+        "message": "This endpoint can be called from React on http://localhost:3000!"
     }
